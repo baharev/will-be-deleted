@@ -1,0 +1,48 @@
+# The window's tests and pictures on each of GitHub's free Mac machines. The
+# project travels inside bundle.tar.age and its results come back inside
+# results.tar.age, both locked with age, because this repository is public.
+name: window
+
+on:
+  push:
+    branches: [main]
+    paths: [window/**, .github/workflows/window.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mac:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-15-intel, macos-26, macos-26-intel]
+    steps:
+      - uses: actions/checkout@v7
+      - id: py38
+        uses: actions/setup-python@v7
+        continue-on-error: true
+        with:
+          python-version: "3.8"
+          update-environment: false
+      - id: pynew
+        uses: actions/setup-python@v7
+        continue-on-error: true
+        with:
+          python-version: "3.14"
+          update-environment: false
+      - name: Window
+        env:
+          AGE_KEY: ${{ secrets.AGE_KEY }}
+          PY38: ${{ steps.py38.outputs.python-path }}
+          PYNEW: ${{ steps.pynew.outputs.python-path }}
+        run: bash window/window.sh
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: window-${{ matrix.os }}
+          path: window/out/
