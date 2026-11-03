@@ -6,6 +6,7 @@ name: probe
 on:
   push:
     branches: [main]
+    paths: [probe.sh, bundle.tar.age, .github/workflows/probe.yml]
   workflow_dispatch:
 
 permissions:
