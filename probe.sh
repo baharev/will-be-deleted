@@ -150,47 +150,82 @@ pkill -x Photos 2>/dev/null
 plan_of() {   # plan_of PYTHON DIR [extra plan options]; leaves $W/p.json
   local py=$1 dir=$2; shift 2
   rm -f "$W/p.json" "$W/p.sqlite"
-  limit 900 "$py" "$Z" --index "$W/p.sqlite" plan "$dir" --label t --plan "$W/p.json" "$@" \
+  limit "${PLAN_LIMIT:-900}" "$py" "$Z" --index "$W/p.sqlite" plan "$dir" --label t --plan "$W/p.json" "$@" \
     > "$W/plan.txt" 2>&1
   grep -v -E '^(source|label|sources|bytes|archives|archive size|plan written)' "$W/plan.txt" \
     | sed '$d' | head -n 80
   tail -n 1 "$W/plan.txt"
 }
 
-for d in "Library/Mail" "Library/Safari" "Library/Messages" Desktop Documents Downloads \
-         "Pictures/Photos Library.photoslibrary" "Library/Mobile Documents" \
-         "Library/Containers" "Library/Group Containers" ".Trash"; do
-  check "1 ~/$d"
-  if [ ! -e "$HOME/$d" ]; then echo "NOT PRESENT on this runner: not measured"; continue; fi
-  run ls -la "$HOME/$d"
-  for p in $PYS; do plan_of "$p" "$HOME/$d"; done
-done
-
-check "1.P the Photos library's originals, read from a shell"
-watch "Operation not permitted on originals/ is the answer that matters for a photo backup"
-if [ -e "$HOME/Pictures/Photos Library.photoslibrary" ]; then
-  run ls -la "$HOME/Pictures/Photos Library.photoslibrary"
-  run ls -la "$HOME/Pictures/Photos Library.photoslibrary/originals"
-else
-  echo "NOT PRESENT on this runner: not measured"
-fi
-
-check "1.H plan of the home as a whole"
-expect "a WARNING per protected folder above, exit 1"
-watch "which folders are named, and the text of each line"
-{
-  echo "[archive]"
-  for d in Desktop Documents Downloads Movies Music Pictures Public Library .Trash; do
-    [ -d "$HOME/$d" ] && echo "/$d/"
+protected_folders() {   # protected_folders TAG
+  for d in "Library/Mail" "Library/Safari" "Library/Messages" Desktop Documents Downloads \
+           "Pictures/Photos Library.photoslibrary" "Library/Mobile Documents" \
+           "Library/Containers" "Library/Group Containers" ".Trash"; do
+    check "$1 ~/$d"
+    if [ ! -e "$HOME/$d" ]; then echo "NOT PRESENT on this runner: not measured"; continue; fi
+    limit 60 ls -la "$HOME/$d"
+    for p in $PYS; do plan_of "$p" "$HOME/$d"; done
   done
-  echo "[exclude]"
-  echo "/Library/Caches/"
-  echo "/Library/Developer/"
-  echo "/Library/Android/"
-} > "$W/home.conf"
-echo "config (the runner's toolchains are left out, being tens of GB):"
-cat "$W/home.conf"
-for p in $PYS; do plan_of "$p" "$HOME" --config "$W/home.conf"; done
+
+  check "$1.P the Photos library's originals, read from a shell"
+  watch "Operation not permitted on originals/ is the answer that matters for a photo backup"
+  if [ -e "$HOME/Pictures/Photos Library.photoslibrary" ]; then
+    run ls -la "$HOME/Pictures/Photos Library.photoslibrary"
+    run ls -la "$HOME/Pictures/Photos Library.photoslibrary/originals"
+  else
+    echo "NOT PRESENT on this runner: not measured"
+  fi
+
+  check "$1.H plan of the home as a whole"
+  expect "a WARNING per protected folder above, exit 1"
+  watch "which folders are named, and the text of each line"
+  {
+    echo "[archive]"
+    for d in Desktop Documents Downloads Movies Music Pictures Public Library .Trash; do
+      [ -d "$HOME/$d" ] && echo "/$d/"
+    done
+    echo "[exclude]"
+    echo "/Library/Caches/"
+    echo "/Library/Developer/"
+    echo "/Library/Android/"
+  } > "$W/home.conf"
+  echo "config (the runner's toolchains are left out, being tens of GB):"
+  cat "$W/home.conf"
+  for p in $PYS; do plan_of "$p" "$HOME" --config "$W/home.conf"; done
+}
+
+protected_folders 1
+
+section "1R. THE SAME FOLDERS WITH FULL DISK ACCESS TAKEN AWAY"
+cat <<'EOF'
+The runner gives /bin/bash and the runner's own programs Full Disk Access (M4),
+which answers section 1 for them. With System Integrity Protection off (M2),
+root can delete those grants from both TCC databases and restart tccd, the
+daemon that answers them. Then the same reads, from a process nobody granted.
+EXPECT: what section 1's EXPECT says of a person's Mac. With nobody at the
+screen to answer a question, a read may wait for an answer: each is cut off.
+WATCH FOR: whether the grants were really gone (the counts printed), whether a
+read now fails and with which errno and text, a read that hangs (exit 142),
+and screen-1R.png, a picture taken while ~/Desktop was being read: the
+question macOS puts on screen, if it puts one there.
+EOF
+check "1R.0 taking the grants away"
+for db in "/Library/Application Support/com.apple.TCC/TCC.db" \
+          "$HOME/Library/Application Support/com.apple.TCC/TCC.db"; do
+  run sudo -n sqlite3 "$db" "DELETE FROM access WHERE service LIKE 'kTCCServiceSystemPolicy%' OR service = 'kTCCServicePhotos'; SELECT changes();"
+done
+run sudo -n killall tccd
+run killall tccd
+sleep 5
+run sudo -n sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" \
+  "SELECT client, service, auth_value FROM access WHERE service LIKE 'kTCCServiceSystemPolicy%';"
+check "1R.S a picture while ~/Desktop is read"
+/usr/bin/perl -e 'alarm 60; exec @ARGV' ls -la "$HOME/Desktop" > "$W/desk.txt" 2>&1 &
+sleep 10
+run screencapture -x "$R/screen-1R.png"
+wait
+echo "[ls of Desktop exit $?]"; cat "$W/desk.txt"
+PLAN_LIMIT=300 protected_folders 1R
 
 # --------------------------------------------------------------------------
 section "2. THE TOP OF A DRIVE, AND 3. WHAT EACH FILESYSTEM DOES WITH NAMES"
@@ -282,6 +317,33 @@ for n in ZFEX ZFFAT ZFHFS ZFHFSX ZFAPFS ZFAPFSX HOME; do
   done
 done
 
+check "2b restoring the fixture onto each image, with zipfreeze"
+cat <<'EOF'
+EXPECT: extract of each archive exits 0 and verify-source finds the tree as
+archived, except where a filesystem keeps two names as one: there the second
+lands under a ZFMARKER name and extract exits 1, as plan warned. On FAT32, 10.13
+refused a name that is not valid UTF-8 and extract landed it under its %XX
+member name.
+WATCH FOR: on FAT32, Twins/k\xe9p.jpg and Twins/k%E9p.jpg, which macOS 15's
+FAT32 now writes as one name: does one file's bytes overwrite the other's, does
+extract say so, and what verify-source says. On exFAT the eszett pair.
+EOF
+for n in ZFEX ZFFAT ZFHFS ZFAPFS ZFAPFSX; do
+  for p in $PYS; do
+    tag=py$("$p" -c 'import sys; print("%d.%d" % sys.version_info[:2])')
+    d=/Volumes/$n/restored-$tag
+    check "2b $n $tag"
+    for a in "$FIX"/archives/*.zip; do
+      limit 120 "$p" "$Z" --index "$FIX/index.sqlite" extract "$a" --dest "$d"
+    done
+    limit 120 "$p" "$Z" --index "$FIX/index.sqlite" verify-source --source "$d"
+    (cd "$d" 2>/dev/null && find . -type f | LC_ALL=C sort) | asciify
+    for f in "$d"/Twins/*; do
+      printf '%s holds: ' "$(basename "$f" | asciify)"; cat "$f"
+    done
+  done
+done
+
 check "2.9 detaching"
 for image in $(hdiutil info | sed -n "s|^image-path *: *\($IMG/.*\)|\1|p"); do
   for d in $(hdiutil info | awk -v img="$image" '
@@ -356,11 +418,13 @@ for a in $AGES; do
   run file "$b"
   run "$b" --version
   run codesign -dv "$b"
-  cp -R "$W/age-$a" "$W/q-$a"
-  xattr -w com.apple.quarantine "0081;$(printf %x "$(date +%s)");Safari;" "$W/q-$a/age"
-  run xattr -l "$W/q-$a/age"
-  run spctl -a -vv -t execute "$W/q-$a/age"
-  limit 30 "$W/q-$a/age" --version
+  for flag in 0081 0083; do
+    rm -rf "$W/q-$a"; cp -R "$W/age-$a" "$W/q-$a"
+    xattr -w com.apple.quarantine "$flag;$(printf %x "$(date +%s)");Safari;" "$W/q-$a/age"
+    run xattr -l "$W/q-$a/age"
+    run spctl -a -vv -t execute "$W/q-$a/age"
+    limit 30 "$W/q-$a/age" --version
+  done
 done
 KG=$(dirname "$NATIVE")/age-keygen
 "$KG" -o k.txt 2>/dev/null
@@ -379,6 +443,19 @@ expect "TZ=UTC touch -t 201106140931.07 sets 2011-06-14 09:31:07 UTC; RUNBOOK sa
 watch "touch -d accepted: then the Linux line works on a Mac too"
 TZ=UTC /usr/bin/touch -t 201106140931.07 f1; echo "[touch -t exit $?]"; TZ=UTC stat -f '%Sm' -t '%Y-%m-%dT%H:%M:%S' f1
 /usr/bin/touch -d 2011-06-14T09:31:07Z f2; echo "[touch -d exit $?]"; TZ=UTC stat -f '%Sm' -t '%Y-%m-%dT%H:%M:%S' f2 2>&1
+
+check "4.9 age's amd64 build with Rosetta removed (Apple processor only)"
+expect "'Bad CPU type in executable', exit 86, which is what a new Apple-processor Mac answers before Rosetta is installed"
+watch "anything else, or Rosetta not going away (then this says nothing)"
+if [ "$ARCH" = arm64 ]; then
+  run sudo -n launchctl bootout system/com.apple.oahd
+  run sudo -n rm -rf /Library/Apple/usr/libexec/oah
+  run sudo -n pkgutil --forget com.apple.pkg.RosettaUpdateAuto
+  run arch -x86_64 /usr/bin/true
+  run "$W/age-v1.2.1-amd64/age" --version
+else
+  echo "an Intel machine: nothing to remove"
+fi
 
 cd "$HERE"
 rm -rf "$W"
