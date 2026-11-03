@@ -1,0 +1,50 @@
+# Runs probe.sh on each of GitHub's free Mac machines: macOS 15 and 26, each on
+# an Apple processor and on Intel. The report and the platform-facts files of
+# each come back as an artifact named after the machine.
+name: probe
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mac:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-15-intel, macos-26, macos-26-intel]
+    steps:
+      - uses: actions/checkout@v7
+      # 3.8 may not exist for an Apple processor: that is an answer, not a failure.
+      - id: py38
+        uses: actions/setup-python@v7
+        continue-on-error: true
+        with:
+          python-version: "3.8"
+          update-environment: false
+      - id: pynew
+        uses: actions/setup-python@v7
+        continue-on-error: true
+        with:
+          python-version: "3.14"
+          update-environment: false
+      - name: Probe
+        env:
+          AGE_KEY: ${{ secrets.AGE_KEY }}
+          PY38: ${{ steps.py38.outputs.python-path }}
+          PYNEW: ${{ steps.pynew.outputs.python-path }}
+        run: |
+          mkdir -p results
+          bash probe.sh 2>&1 | tee results/report.txt
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: results-${{ matrix.os }}
+          path: results/
