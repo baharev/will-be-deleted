@@ -444,6 +444,46 @@ watch "touch -d accepted: then the Linux line works on a Mac too"
 TZ=UTC /usr/bin/touch -t 201106140931.07 f1; echo "[touch -t exit $?]"; TZ=UTC stat -f '%Sm' -t '%Y-%m-%dT%H:%M:%S' f1
 /usr/bin/touch -d 2011-06-14T09:31:07Z f2; echo "[touch -d exit $?]"; TZ=UTC stat -f '%Sm' -t '%Y-%m-%dT%H:%M:%S' f2 2>&1
 
+check "4.10 the encrypted recipes of RUNBOOK's Mac part, as a Mac follows them"
+cat <<'EOF'
+mac-disk.sh is the recipe for the disk `encrypt` wrote, and mac-bucket.sh the
+bucket recipe in its console form (the two objects already in the folder, the
+`aws s3 cp` lines left out), each rendered from RUNBOOK.md on Linux for every
+archive of an encrypted index. Each runs under bash and under zsh, the shell a
+Mac's Terminal opens, with only the system's own programs on the PATH and
+answer.py typing the passphrase at each prompt.
+EXPECT: one prompt per archive, exit 0; each zip it writes has the SHA-256 the
+index records; `unzip` writes its files; and no file left anywhere in the
+folder holds an unwrapped key (AGE-SECRET-KEY-).
+WATCH FOR: a second prompt, the pipe failing in either shell, a zip whose
+hash differs, or a file holding the key.
+EOF
+ln -s "$(dirname "$NATIVE")" "$W/age-native"
+E=$W/b/enc
+PASS=$(cat "$E/passphrase.txt")
+for shell in /bin/bash /bin/zsh; do
+  for recipe in disk bucket; do
+    d=$W/r-$recipe-$(basename "$shell")
+    mkdir -p "$d" && cd "$d" || continue
+    [ $recipe = bucket ] && cp "$E/medium/identity.age" "$E"/medium/*.zip.age .
+    printf '\n-- %s recipe under %s\n' "$recipe" "$shell"
+    PATH=/usr/bin:/bin:/usr/sbin:/sbin limit 300 "$HELPER" "$W/b/answer.py" "$PASS" \
+      "$shell" "$E/mac-$recipe.sh"
+    /usr/bin/sqlite3 "$E/index.sqlite" \
+      "SELECT name, sha256 FROM archive WHERE name NOT LIKE 'Twins%' ORDER BY name;" \
+      | while IFS='|' read -r name sum; do
+          got=$(/usr/bin/shasum -a 256 "$name" 2>/dev/null | cut -d' ' -f1)
+          if [ "$got" = "$sum" ]; then echo "$name: the index's SHA-256"
+          else echo "$name: DIFFERS from the index ($got)"; fi
+        done
+    keys=$(find . -type f -exec /usr/bin/grep -l 'AGE-SECRET-KEY-' {} + 2>/dev/null)
+    if [ -n "$keys" ]; then echo "UNWRAPPED KEY in: $keys"
+    else echo "no file holds an unwrapped key"; fi
+    echo "files written: $(find . -type f | wc -l | tr -d ' ')"
+    cd "$W"
+  done
+done
+
 check "4.9 age's amd64 build with Rosetta removed (Apple processor only)"
 expect "'Bad CPU type in executable', exit 86, which is what a new Apple-processor Mac answers before Rosetta is installed"
 watch "anything else, or Rosetta not going away (then this says nothing)"
