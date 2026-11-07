@@ -30,5 +30,7 @@ rm -f "${W:?}/key.txt"
 /usr/bin/perl -e 'alarm shift; exec @ARGV or die "exec: $!\n"' 1200 \
     bash "$W/b/run.sh" "$STAGE" "$W" > "$W/results/report.txt" 2>&1
 echo "exit $?"
+# whatever the run started and left, so that GitHub's clean-up has nothing to name in the log
+ps -axo pid=,command= | awk -v w="$W/" 'index($0, w) && !/awk/ {print $1}' | xargs kill -9 2>/dev/null
 COPYFILE_DISABLE=1 tar -C "$W/results" -cf - . \
     | "$W/age/age" -r "$(cat "$W/b/recipient.txt")" > "$HERE/out/results.tar.age"
