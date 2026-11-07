@@ -1,0 +1,74 @@
+# Builds a locked bundle on two of GitHub's free Mac machines and tries what came out on
+# all four. Everything specific travels inside packed/bundle.tar.age and comes back inside
+# results.tar.age, both locked with age, because this repository is public.
+name: packed
+
+on:
+  push:
+    branches: [main]
+    paths: [packed/**, .github/workflows/packed.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  make:
+    name: make ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-15-intel]
+    steps:
+      - uses: actions/checkout@v7
+      - id: py
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          update-environment: false
+      - name: Run
+        env:
+          AGE_KEY: ${{ secrets.AGE_KEY }}
+          PY: ${{ steps.py.outputs.python-path }}
+        run: bash packed/open.sh make
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: made-${{ matrix.os }}
+          path: packed/out/
+          compression-level: 0
+          retention-days: 14
+  try:
+    name: try ${{ matrix.os }}
+    needs: make
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-15-intel, macos-26, macos-26-intel]
+    steps:
+      - uses: actions/checkout@v7
+      - id: py
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          update-environment: false
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: made-*
+          path: packed/made
+      - name: Run
+        env:
+          AGE_KEY: ${{ secrets.AGE_KEY }}
+          PY: ${{ steps.py.outputs.python-path }}
+        run: bash packed/open.sh try
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: tried-${{ matrix.os }}
+          path: packed/out/
+          compression-level: 0
+          retention-days: 14
