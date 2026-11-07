@@ -27,7 +27,7 @@ for f in "$HERE"/made/*/results.tar.age; do
   "$W/age/age" -d -i "$W/key.txt" "$f" | tar -x -C "$d"
 done
 rm -f "${W:?}/key.txt"
-/usr/bin/perl -e 'alarm shift; exec @ARGV or die "exec: $!\n"' 2400 \
+/usr/bin/perl -e 'alarm shift; exec @ARGV or die "exec: $!\n"' 1200 \
     bash "$W/b/run.sh" "$STAGE" "$W" > "$W/results/report.txt" 2>&1
 echo "exit $?"
 COPYFILE_DISABLE=1 tar -C "$W/results" -cf - . \
