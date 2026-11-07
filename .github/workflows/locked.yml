@@ -36,11 +36,18 @@ jobs:
         with:
           python-version: "3.14"
           update-environment: false
+      - id: tk86
+        uses: actions/setup-python@v7
+        continue-on-error: true
+        with:
+          python-version: "3.13"
+          update-environment: false
       - name: Run
         env:
           AGE_KEY: ${{ secrets.AGE_KEY }}
           PY_NEWEST: ${{ steps.newest.outputs.python-path }}
           PY_OLDER: ${{ steps.older.outputs.python-path }}
+          PY_TK86: ${{ steps.tk86.outputs.python-path }}
         run: bash locked/open.sh
       - uses: actions/upload-artifact@v7
         if: always()
