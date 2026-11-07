@@ -1,0 +1,51 @@
+# Runs a locked bundle on each of GitHub's free Mac machines. Everything specific travels
+# inside locked/bundle.tar.age and comes back inside results.tar.age, both locked with
+# age, because this repository is public.
+name: locked
+
+on:
+  push:
+    branches: [main]
+    paths: [locked/**, .github/workflows/locked.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mac:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-15-intel, macos-26, macos-26-intel]
+    steps:
+      - uses: actions/checkout@v7
+      - id: newest
+        uses: actions/setup-python@v7
+        continue-on-error: true
+        with:
+          python-version: "3.x"
+          check-latest: true
+          update-environment: false
+      - id: older
+        uses: actions/setup-python@v7
+        continue-on-error: true
+        with:
+          python-version: "3.14"
+          update-environment: false
+      - name: Run
+        env:
+          AGE_KEY: ${{ secrets.AGE_KEY }}
+          PY_NEWEST: ${{ steps.newest.outputs.python-path }}
+          PY_OLDER: ${{ steps.older.outputs.python-path }}
+        run: bash locked/open.sh
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: locked-${{ matrix.os }}
+          path: locked/out/
+          compression-level: 0
+          retention-days: 14
